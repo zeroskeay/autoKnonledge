@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 自适应学习助手</title>
+    <meta name="description" content="AI驱动的自适应学习助手，通过对话式交互为你定制个性化学习路径">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Symbols+Rounded" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div id="app">
+
+        <!-- ====== SETTINGS PAGE ====== -->
+        <section class="page active" id="page-settings">
+            <div class="settings-container">
+                <div class="settings-header">
+                    <div class="logo-circle">
+                        <span class="material-symbols-rounded">psychology</span>
+                    </div>
+                    <h1>自适应学习架构师</h1>
+                    <p class="subtitle">AI 驱动的个性化学习路径引擎</p>
+                </div>
+
+                <div class="settings-card">
+                    <h2><span class="material-symbols-rounded">tune</span> API 配置</h2>
+
+                    <div class="form-group">
+                        <label for="api-provider">AI 提供商</label>
+                        <div class="provider-toggle three-col">
+                            <button class="toggle-btn active" data-provider="groq">
+                                <span class="provider-icon">⚡</span> Groq
+                            </button>
+                            <button class="toggle-btn" data-provider="gemini">
+                                <span class="provider-icon">✦</span> Gemini
+                            </button>
+                            <button class="toggle-btn" data-provider="glm">
+                                <span class="provider-icon">智</span> GLM
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="api-key">API Key</label>
+                        <div class="input-wrapper">
+                            <input type="password" id="api-key" placeholder="输入你的 API Key" autocomplete="off">
+                            <button class="input-toggle-eye" id="toggle-key" title="显示/隐藏">
+                                <span class="material-symbols-rounded">visibility_off</span>
+                            </button>
+                        </div>
+                        <div class="input-hint" id="api-hint">
+                            <span class="material-symbols-rounded">info</span>
+                            <span id="hint-text">前往 <a href="https://console.groq.com/keys"
+                                    target="_blank">console.groq.com</a> 获取
+                                Groq API Key</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="model-select">模型 <span class="model-status" id="model-status"></span></label>
+                        <select id="model-select" disabled>
+                            <option value="">— 请先输入 API Key —</option>
+                        </select>
+                    </div>
+
+                    <button class="btn-primary" id="btn-start-chat">
+                        <span class="material-symbols-rounded">chat</span>
+                        开始学习对话
+                    </button>
+                </div>
+
+                <!-- History List -->
+                <div class="history-section" id="history-section" style="display:none;">
+                    <h3><span class="material-symbols-rounded">history</span> 历史会话</h3>
+                    <div class="history-list" id="history-list"></div>
+                </div>
+
+                <div class="admin-panel">
+                    <input type="password" id="admin-pass" placeholder="Admin Code" autocomplete="off">
+                    <button id="btn-unlock" title="解锁预设 Key">🔓</button>
+                </div>
+
+                <div class="settings-footer">
+                    <p>API Key 仅存储在本地浏览器中，不会上传到任何服务器</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ====== CHAT PAGE ====== -->
+        <section class="page" id="page-chat">
+            <!-- Chat header -->
+            <div class="chat-header">
+                <div class="chat-header-left">
+                    <button class="icon-btn" id="btn-back-settings" title="设置">
+                        <span class="material-symbols-rounded">arrow_back</span>
+                    </button>
+                    <div class="chat-header-info">
+                        <h2>学习架构师</h2>
+                        <div class="chat-status" id="chat-status">
+                            <span class="status-dot"></span>
+                            <span id="status-text">诊断阶段</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-header-right">
+                    <button class="icon-btn" id="btn-switch-engine" title="切换到学习模式" style="display:none;">
+                        <span class="material-symbols-rounded">school</span>
+                    </button>
+                    <button class="icon-btn" id="btn-new-chat" title="新对话">
+                        <span class="material-symbols-rounded">add_comment</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Chat messages -->
+            <div class="chat-messages" id="chat-messages">
+                <!-- Messages will be inserted here -->
+            </div>
+
+            <!-- Chat input -->
+            <div class="chat-input-bar">
+                <div class="chat-input-wrapper">
+                    <textarea id="chat-input" placeholder="输入你的回答..." rows="1"></textarea>
+                    <button class="send-btn" id="btn-send" disabled>
+                        <span class="material-symbols-rounded">send</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <script src="ai-service.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
