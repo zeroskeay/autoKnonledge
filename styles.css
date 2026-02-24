@@ -1089,9 +1089,16 @@ select:focus {
 }
 
 /* ====== SWIPE-DELETE (Opt 8) ====== */
+/* Override old .history-item styles — visual styling moved to .history-item-inner */
 .history-item {
+    display: block !important;
+    padding: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    cursor: default !important;
     position: relative;
     overflow: hidden;
+    border-radius: var(--radius-lg);
 }
 
 .history-item-inner {
