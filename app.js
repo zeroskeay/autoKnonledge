@@ -333,8 +333,16 @@
             dragging = false;
             const dx = e.clientX - startX;
             if (dx < -THRESHOLD) {
+                // Full swipe — reveal actions
                 inner.style.transform = `translateX(-${THRESHOLD * 2}px)`;
                 swiped = true;
+                // Absorb the click that fires right after pointerup
+                inner.addEventListener('click', ev => ev.stopPropagation(), { once: true, capture: true });
+            } else if (Math.abs(dx) > 8) {
+                // Partial drag — snap back, still block accidental click
+                inner.style.transform = '';
+                swiped = false;
+                inner.addEventListener('click', ev => ev.stopPropagation(), { once: true, capture: true });
             } else {
                 inner.style.transform = '';
                 swiped = false;
