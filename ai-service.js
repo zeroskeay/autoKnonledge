@@ -1,5 +1,8 @@
 /**
  * AI Service — Groq / Gemini / GLM 多 API 统一调用层 + 流式输出
+ * Optimizations applied:
+ *   - Opt 2: Friendly error parsing per provider
+ *   - Opt 6: Merged duplicate _call* / _call*Direct into single _dispatchCall
  */
 
 // ====== SYSTEM PROMPTS ======
@@ -124,11 +127,7 @@ class AIService {
     // ---- Config ----
 
     getConfig() {
-        return {
-            provider: this.provider,
-            apiKey: this.apiKey,
-            model: this.model,
-        };
+        return { provider: this.provider, apiKey: this.apiKey, model: this.model };
     }
 
     setConfig({ provider, apiKey, model }) {
@@ -149,43 +148,28 @@ class AIService {
         }
     }
 
-    isConfigured() {
-        return !!this.apiKey;
-    }
+    isConfigured() { return !!this.apiKey; }
 
     // ---- List available models ----
 
     async listModels(provider, apiKey) {
-        try {
-            if (provider === 'groq') {
-                return await this._listGroqModels(apiKey);
-            } else if (provider === 'gemini') {
-                return await this._listGeminiModels(apiKey);
-            } else if (provider === 'glm') {
-                return await this._listGlmModels(apiKey);
-            }
-            return [];
-        } catch (err) {
-            throw err;
-        }
+        if (provider === 'groq') return this._listGroqModels(apiKey);
+        if (provider === 'gemini') return this._listGeminiModels(apiKey);
+        if (provider === 'glm') return this._listGlmModels(apiKey);
+        return [];
     }
 
     async _listGroqModels(apiKey) {
         try {
-            const response = await fetch('https://api.groq.com/openai/v1/models', {
+            const resp = await fetch('https://api.groq.com/openai/v1/models', {
                 headers: { 'Authorization': `Bearer ${apiKey}` },
             });
-            if (!response.ok) {
-                console.warn(`Groq models fetch failed (${response.status}), using fallback list.`);
-                throw new Error(`API Key 无效或请求失败 (${response.status})`);
-            }
-            const data = await response.json();
-            const models = (data.data || [])
-                .map(m => ({ id: m.id, name: m.id }))
+            if (!resp.ok) throw new Error(await resp.text());
+            const data = await resp.json();
+            return (data.data || []).map(m => ({ id: m.id, name: m.id }))
                 .sort((a, b) => a.name.localeCompare(b.name));
-            return models;
-        } catch (err) {
-            // Fallback to manual list if API fails (likely due to CORS or key)
+        } catch {
+            // CORS or network fallback
             return [
                 { id: 'llama-3.3-70b-versatile', name: 'llama-3.3-70b-versatile' },
                 { id: 'llama-3.1-70b-versatile', name: 'llama-3.1-70b-versatile' },
@@ -199,48 +183,35 @@ class AIService {
     }
 
     async _listGeminiModels(apiKey) {
-        const response = await fetch(
+        const resp = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
         );
-        if (!response.ok) {
-            throw new Error(`API Key 无效或请求失败 (${response.status})`);
-        }
-        const data = await response.json();
-        const models = (data.models || [])
+        if (!resp.ok) throw new Error(this._parseErr(await resp.text(), 'Gemini'));
+        const data = await resp.json();
+        return (data.models || [])
             .filter(m => m.supportedGenerationMethods?.includes('generateContent'))
-            .map(m => ({
-                id: m.name.replace('models/', ''),
-                name: m.displayName || m.name.replace('models/', ''),
-            }))
+            .map(m => ({ id: m.name.replace('models/', ''), name: m.displayName || m.name.replace('models/', '') }))
             .sort((a, b) => a.name.localeCompare(b.name));
-        return models;
     }
 
     async _listGlmModels(apiKey) {
-        const response = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
+        const resp = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
             headers: { 'Authorization': `Bearer ${apiKey}` },
         });
-        if (!response.ok) {
-            throw new Error(`API Key 无效或请求失败 (${response.status})`);
-        }
-        const data = await response.json();
-        const models = (data.data || [])
+        if (!resp.ok) throw new Error(this._parseErr(await resp.text(), 'GLM'));
+        const data = await resp.json();
+        return (data.data || [])
             .filter(m => m.id && !m.id.includes('embedding'))
             .map(m => ({ id: m.id, name: m.id }))
             .sort((a, b) => a.name.localeCompare(b.name));
-        return models;
     }
 
     // ---- Phase management ----
 
-    setPhase(phase) {
-        this.currentPhase = phase;
-    }
+    setPhase(phase) { this.currentPhase = phase; }
 
     getSystemPrompt() {
-        return this.currentPhase === 'engine'
-            ? SYSTEM_PROMPT_ENGINE
-            : SYSTEM_PROMPT_ARCHITECT;
+        return this.currentPhase === 'engine' ? SYSTEM_PROMPT_ENGINE : SYSTEM_PROMPT_ARCHITECT;
     }
 
     // ---- Conversation ----
@@ -251,20 +222,14 @@ class AIService {
     }
 
     switchToEngine(reportText) {
-        // Switch phase and inject the report as context
         this.currentPhase = 'engine';
-        this.conversationHistory = [
-            { role: 'user', content: reportText }
-        ];
+        this.conversationHistory = [{ role: 'user', content: reportText }];
     }
 
     // ---- State persistence ----
 
     exportState() {
-        return {
-            conversationHistory: [...this.conversationHistory],
-            currentPhase: this.currentPhase,
-        };
+        return { conversationHistory: [...this.conversationHistory], currentPhase: this.currentPhase };
     }
 
     importState(state) {
@@ -274,153 +239,120 @@ class AIService {
         }
     }
 
+    // ---- Error helper (Opt 2) ----
+
+    _parseErr(errText, providerLabel) {
+        try {
+            const obj = JSON.parse(errText);
+            const msg = obj?.error?.message || obj?.message || errText;
+            return `${providerLabel} 返回错误：${msg}`;
+        } catch {
+            return `${providerLabel} API 错误：${errText}`;
+        }
+    }
+
+    // ---- Unified dispatch (Opt 6) ----
+
+    async _dispatchCall(messages, onChunk) {
+        const { provider, apiKey, model } = this;
+        if (provider === 'groq') {
+            return this._callOpenAI(
+                'https://api.groq.com/openai/v1/chat/completions',
+                apiKey, model || 'llama-3.3-70b-versatile', messages, onChunk, 'Groq'
+            );
+        }
+        if (provider === 'glm') {
+            return this._callOpenAI(
+                'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+                apiKey, model || 'glm-4-flash', messages, onChunk, 'GLM'
+            );
+        }
+        if (provider === 'gemini') {
+            return this._callGemini(model || 'gemini-2.0-flash', messages, onChunk);
+        }
+        throw new Error(`不支持的 AI 服务商：${provider}`);
+    }
+
     // ---- API Calls ----
 
     async sendMessage(userMessage, onChunk) {
-        if (!this.isConfigured()) {
-            throw new Error('请先在设置中配置 API Key');
-        }
+        if (!this.isConfigured()) throw new Error('请先在设置中配置 API Key');
 
-        // Add user message to history
-        this.conversationHistory.push({
-            role: 'user',
-            content: userMessage,
-        });
-
-        // Build messages array with system prompt
-        const messages = [
-            { role: 'system', content: this.getSystemPrompt() },
-            ...this.conversationHistory,
-        ];
-
+        this.conversationHistory.push({ role: 'user', content: userMessage });
+        const messages = [{ role: 'system', content: this.getSystemPrompt() }, ...this.conversationHistory];
         this.abortController = new AbortController();
 
-        let fullResponse = '';
-
         try {
-            if (this.provider === 'groq') {
-                fullResponse = await this._callGroq(messages, onChunk);
-            } else if (this.provider === 'gemini') {
-                fullResponse = await this._callGemini(messages, onChunk);
-            } else if (this.provider === 'glm') {
-                fullResponse = await this._callGlm(messages, onChunk);
-            } else {
-                throw new Error(`Unknown provider: ${this.provider}`);
-            }
-
-            // Add assistant response to history
-            this.conversationHistory.push({
-                role: 'assistant',
-                content: fullResponse,
-            });
-
+            const fullResponse = await this._dispatchCall(messages, onChunk);
+            this.conversationHistory.push({ role: 'assistant', content: fullResponse });
             return fullResponse;
         } catch (err) {
-            // Remove the user message if call failed
             this.conversationHistory.pop();
             throw err;
         }
     }
 
-    abort() {
-        if (this.abortController) {
-            this.abortController.abort();
-        }
+    abort() { if (this.abortController) this.abortController.abort(); }
+
+    // ---- Regenerate last AI response (Opt 8) ----
+    async replayLastMessage(onChunk) {
+        if (!this.isConfigured()) throw new Error('请先配置 API Key');
+        this.abortController = new AbortController();
+        const messages = [{ role: 'system', content: this.getSystemPrompt() }, ...this.conversationHistory];
+        const fullResponse = await this._dispatchCall(messages, onChunk);
+        this.conversationHistory.push({ role: 'assistant', content: fullResponse });
+        return fullResponse;
     }
 
-    // ---- Groq API (OpenAI compatible) ----
-
-    async _callGroq(messages, onChunk) {
-        const model = this.model || 'llama-3.3-70b-versatile';
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-            },
-            body: JSON.stringify({
-                model,
-                messages,
-                stream: true,
-            }),
-            signal: this.abortController.signal,
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Groq API 错误 (${response.status}): ${errText}`);
-        }
-
-        return this._readSSEStream(response.body, onChunk);
+    async startArchitect(onChunk) {
+        this.resetConversation();
+        const initMessages = [
+            { role: 'system', content: this.getSystemPrompt() },
+            { role: 'user', content: '你好，我准备好了，请开始。' },
+        ];
+        this.abortController = new AbortController();
+        try {
+            const fullResponse = await this._dispatchCall(initMessages, onChunk);
+            this.conversationHistory.push(
+                { role: 'user', content: '你好，我准备好了，请开始。' },
+                { role: 'assistant', content: fullResponse }
+            );
+            return fullResponse;
+        } catch (err) { throw err; }
     }
 
-    // ---- GLM API (OpenAI compatible) ----
+    // ---- OpenAI-compatible (Groq + GLM) ----
 
-    async _callGlm(messages, onChunk) {
-        const model = this.model || 'glm-4-flash';
-        const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+    async _callOpenAI(url, apiKey, model, messages, onChunk, label) {
+        const resp = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-            },
-            body: JSON.stringify({
-                model,
-                messages,
-                stream: true,
-            }),
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ model, messages, stream: true }),
             signal: this.abortController.signal,
         });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`GLM API 错误 (${response.status}): ${errText}`);
-        }
-
-        return this._readSSEStream(response.body, onChunk);
+        if (!resp.ok) throw new Error(this._parseErr(await resp.text(), label));
+        return this._readSSEStream(resp.body, onChunk);
     }
 
     // ---- Gemini API ----
 
-    async _callGemini(messages, onChunk) {
-        const model = this.model || 'gemini-2.0-flash';
+    async _callGemini(model, messages, onChunk) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
-
-        // Convert OpenAI format to Gemini format
-        const systemInstruction = messages.find(m => m.role === 'system');
+        const sys = messages.find(m => m.role === 'system');
         const contents = messages
             .filter(m => m.role !== 'system')
-            .map(m => ({
-                role: m.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: m.content }],
-            }));
+            .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] }));
+        const body = { contents, generationConfig: { temperature: 0.7 } };
+        if (sys) body.systemInstruction = { parts: [{ text: sys.content }] };
 
-        const body = {
-            contents,
-            generationConfig: {
-                temperature: 0.7,
-            },
-        };
-
-        if (systemInstruction) {
-            body.systemInstruction = {
-                parts: [{ text: systemInstruction.content }],
-            };
-        }
-
-        const response = await fetch(url, {
+        const resp = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
             signal: this.abortController.signal,
         });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Gemini API 错误 (${response.status}): ${errText}`);
-        }
-
-        return this._readGeminiSSEStream(response.body, onChunk);
+        if (!resp.ok) throw new Error(this._parseErr(await resp.text(), 'Gemini'));
+        return this._readGeminiSSEStream(resp.body, onChunk);
     }
 
     // ---- Stream Readers ----
@@ -428,179 +360,47 @@ class AIService {
     async _readSSEStream(body, onChunk) {
         const reader = body.getReader();
         const decoder = new TextDecoder();
-        let fullText = '';
-        let buffer = '';
-
+        let fullText = '', buffer = '';
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
-
             for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed || !trimmed.startsWith('data: ')) continue;
-                const data = trimmed.slice(6);
+                const t = line.trim();
+                if (!t.startsWith('data: ')) continue;
+                const data = t.slice(6);
                 if (data === '[DONE]') continue;
-
                 try {
-                    const json = JSON.parse(data);
-                    const delta = json.choices?.[0]?.delta?.content;
-                    if (delta) {
-                        fullText += delta;
-                        if (onChunk) onChunk(delta, fullText);
-                    }
-                } catch (e) {
-                    // skip parse errors
-                }
+                    const delta = JSON.parse(data).choices?.[0]?.delta?.content;
+                    if (delta) { fullText += delta; if (onChunk) onChunk(delta, fullText); }
+                } catch { /* skip */ }
             }
         }
-
         return fullText;
     }
 
     async _readGeminiSSEStream(body, onChunk) {
         const reader = body.getReader();
         const decoder = new TextDecoder();
-        let fullText = '';
-        let buffer = '';
-
+        let fullText = '', buffer = '';
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
-
             for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed || !trimmed.startsWith('data: ')) continue;
-                const data = trimmed.slice(6);
-
+                const t = line.trim();
+                if (!t.startsWith('data: ')) continue;
                 try {
-                    const json = JSON.parse(data);
-                    const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (text) {
-                        fullText += text;
-                        if (onChunk) onChunk(text, fullText);
-                    }
-                } catch (e) {
-                    // skip parse errors
-                }
+                    const text = JSON.parse(t.slice(6)).candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) { fullText += text; if (onChunk) onChunk(text, fullText); }
+                } catch { /* skip */ }
             }
         }
-
         return fullText;
-    }
-
-    // ---- Auto-start architect ----
-
-    async startArchitect(onChunk) {
-        this.resetConversation();
-        // Send empty init message to trigger the first question
-        const initMessages = [
-            { role: 'system', content: this.getSystemPrompt() },
-            { role: 'user', content: '你好，我准备好了，请开始。' },
-        ];
-
-        this.abortController = new AbortController();
-        let fullResponse = '';
-
-        try {
-            if (this.provider === 'groq') {
-                fullResponse = await this._callGroqDirect(initMessages, onChunk);
-            } else if (this.provider === 'gemini') {
-                fullResponse = await this._callGeminiDirect(initMessages, onChunk);
-            } else if (this.provider === 'glm') {
-                fullResponse = await this._callGlmDirect(initMessages, onChunk);
-            } else {
-                throw new Error(`Unknown provider: ${this.provider}`);
-            }
-
-            this.conversationHistory.push(
-                { role: 'user', content: '你好，我准备好了，请开始。' },
-                { role: 'assistant', content: fullResponse }
-            );
-
-            return fullResponse;
-        } catch (err) {
-            throw err;
-        }
-    }
-
-    async _callGroqDirect(messages, onChunk) {
-        const model = this.model || 'llama-3.3-70b-versatile';
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-            },
-            body: JSON.stringify({ model, messages, stream: true }),
-            signal: this.abortController.signal,
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Groq API 错误 (${response.status}): ${errText}`);
-        }
-
-        return this._readSSEStream(response.body, onChunk);
-    }
-
-    async _callGlmDirect(messages, onChunk) {
-        const model = this.model || 'glm-4-flash';
-        const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-            },
-            body: JSON.stringify({ model, messages, stream: true }),
-            signal: this.abortController.signal,
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`GLM API 错误 (${response.status}): ${errText}`);
-        }
-
-        return this._readSSEStream(response.body, onChunk);
-    }
-
-    async _callGeminiDirect(messages, onChunk) {
-        const model = this.model || 'gemini-2.0-flash';
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
-
-        const systemInstruction = messages.find(m => m.role === 'system');
-        const contents = messages
-            .filter(m => m.role !== 'system')
-            .map(m => ({
-                role: m.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: m.content }],
-            }));
-
-        const body = { contents, generationConfig: { temperature: 0.7 } };
-        if (systemInstruction) {
-            body.systemInstruction = { parts: [{ text: systemInstruction.content }] };
-        }
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            signal: this.abortController.signal,
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Gemini API 错误 (${response.status}): ${errText}`);
-        }
-
-        return this._readGeminiSSEStream(response.body, onChunk);
     }
 }
 
