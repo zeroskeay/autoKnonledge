@@ -3,7 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>AI 自适应学习助手</title>
     <meta name="description" content="AI驱动的自适应学习助手，通过对话式交互为你定制个性化学习路径">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -102,15 +103,22 @@
                     </button>
                     <div class="chat-header-info">
                         <h2>学习架构师</h2>
-                        <div class="chat-status" id="chat-status">
-                            <span class="status-dot"></span>
-                            <span id="status-text">诊断阶段</span>
+                        <div class="phase-stepper" id="phase-stepper">
+                            <span class="phase-dot active" id="phase-dot-architect">🔍 诊断</span>
+                            <span class="phase-arrow">›</span>
+                            <span class="phase-dot" id="phase-dot-engine">🎓 学习</span>
                         </div>
                     </div>
                 </div>
                 <div class="chat-header-right">
                     <button class="icon-btn" id="btn-switch-engine" title="切换到学习模式" style="display:none;">
                         <span class="material-symbols-rounded">school</span>
+                    </button>
+                    <button class="icon-btn" id="btn-roadmap" title="查看学习全景图">
+                        <span class="material-symbols-rounded">map</span>
+                    </button>
+                    <button class="icon-btn" id="btn-export" title="导出对话为 Markdown">
+                        <span class="material-symbols-rounded">download</span>
                     </button>
                     <button class="icon-btn" id="btn-new-chat" title="新对话">
                         <span class="material-symbols-rounded">add_comment</span>
@@ -134,6 +142,18 @@
             </div>
         </section>
 
+        <!-- Roadmap Bottom-Sheet Modal -->
+        <div id="modal-roadmap" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true">
+            <div class="modal-panel">
+                <div class="modal-header">
+                    <h3><span class="material-symbols-rounded">map</span> 学习全景路线图</h3>
+                    <button class="icon-btn" id="btn-close-modal" title="关闭">
+                        <span class="material-symbols-rounded">close</span>
+                    </button>
+                </div>
+                <div class="modal-body" id="modal-roadmap-content"></div>
+            </div>
+        </div>
     </div>
 
     <script src="ai-service.js"></script>
